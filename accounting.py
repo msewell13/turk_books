@@ -38,18 +38,17 @@ def check_balance():
 def process_user(account):
 	'''Call /files/list_folder for the given user ID and process any changes.'''
 
-	# OAuth token for the user
-	token = os.environ['DB_ACCESS_TOKEN']
-
 	# cursor for the user (None the first time)
 	cursor = None
-
-	dbx = dropbox.Dropbox(token)
+	dbx = dropbox.Dropbox(os.environ['DB_ACCESS_TOKEN'])
 	has_more = True
 
 	while has_more:
 		if cursor is None:
+			print('**************** result **********************')
 			result = dbx.files_list_folder(path='')
+			print('**************** after *********************')
+			print(result.entries)
 		else:
 			result = dbx.files_list_folder_continue(cursor)
 
@@ -67,7 +66,6 @@ def process_user(account):
 
 		# Update cursor
 		cursor = result.cursor
-		redis_client.hset('cursors', account, cursor)
 
 		# Repeat only if there's more to do
 		has_more = result.has_more
