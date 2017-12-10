@@ -78,17 +78,20 @@ def process_user(account):
 def webhook():
 	'''Receive a list of changed user IDs from Dropbox and process each.'''
 
-	# Make sure this is a valid request from Dropbox
-	signature = request.headers.get('X-Dropbox-Signature')
-	if not hmac.compare_digest(signature, hmac.new(bos.environ['DB_APP_SECRET'], request.data, sha256).hexdigest()):
-		abort(403)
+	if request.method == 'GET':
+		return request.args.get('challenge')
+	else:
+		# Make sure this is a valid request from Dropbox
+		signature = request.headers.get('X-Dropbox-Signature')
+		if not hmac.compare_digest(signature, hmac.new(os.environ['DB_APP_SECRET'].encode('UTF-8'), request.data, sha256).hexdigest()):
+			abort(403)
 
-	for account in json.loads(request.data)['list_folder']['accounts']:
-		# We need to respond quickly to the webhook request, so we do the
-		# actual work in a separate thread. For more robustness, it's a
-		# good idea to add the work to a reliable queue and process the queue
-		# in a worker process.
-		threading.Thread(target=process_user, args=(account,)).start()
+		for account in json.loads(request.data)['list_folder']['accounts']:
+			# We need to respond quickly to the webhook request, so we do the
+			# actual work in a separate thread. For more robustness, it's a
+			# good idea to add the work to a reliable queue and process the queue
+			# in a worker process.
+			threading.Thread(target=process_user, args=(account,)).start()
 	return ''
 
 
