@@ -6,6 +6,8 @@ The objective with this project is to create an accounting application that is a
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See deployment for notes on how to deploy the project on a live system.
 
+* Be sure to set the appropriate environment variables
+
 ### Installing
 
 Start by cloning this repository
@@ -25,9 +27,17 @@ $ zappa init
 $ zappa deploy
 '''
 
+## Features
+
+* Upload you receipts and bills to dropbox and have them automically parsed (using combination of OCR and Amazon Mechanical Turk) and then record the transactions to your accounting ledger ([Ledger-CLI](https://www.ledger-cli.org/)).
+
+* If the transaction is a bill, once parsed it will create and send a check to the vendor using [Lob](https://lob.com)
+
 ## Future Developments
 
 * This program doesn't even work yet so let's not get ahead of ourselves.
+* Online Payments API?
+
 
 ## Built With
 

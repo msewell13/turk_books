@@ -1,6 +1,6 @@
 from hashlib import sha256
+from zappa.async import task
 import hmac
-import threading
 from flask import Flask, request
 import dropbox
 import os
@@ -8,6 +8,7 @@ import boto
 from boto.mturk.connection import MTurkConnection
 from boto.mturk.connection import HTMLQuestion
 import json
+import requests
 
 
 app = Flask(__name__)
@@ -17,12 +18,38 @@ mtc = MTurkConnection(os.environ['AWS_ACCESS_KEY_ID'],
 os.environ['AWS_SECRET_ACCESS_KEY'],
 host = 'mechanicalturk.sandbox.amazonaws.com')
 
-#Create connection to dropbox
-# dbx = dropbox.Dropbox(os.environ['DB_ACCESS_TOKEN'])
+
+class Company(object):
+	def __init__(self, domain, users=None):
+		self.domain = domain
+		if users == None:
+			self.users = []
+
+	def add_user(self, user):
+		self.users.append[user]
+
+	def del_user(self, name):
+		for user in self.users:
+			if name == user.name:
+
+class CompanyUser(Company):
+	def __init__(self, domain, mail_prefix):
+		self.mail_prefix = mail_prefix
+		super().__init__(domain)
 
 
-def send_email():
-	return None
+def send_email(email, name, subject, html, time, context, tags):
+	with app.test_request_context():
+		r = requests.post('https://api.mailgun.net/v3/{}/messages'.format(DOMAIN),
+		                                    auth=auth,
+		                                    data={"from": '{}@{}'.format(MAIL_PREFIX, DOMAIN),
+		                                          "to": '{} <{}>'.format(name, email), 
+		                                          "subject": subject,
+		                                          "html": render_template(html, context=context),
+		                                          "o:deliverytime": (datetime.utcnow() + timedelta(days=time)).strftime("%a, %d %b %Y %H:%M:%S +0000"),
+		                                          "v:context": json.dumps(context),
+		                                          "o:tag": tags})
+		print 'Status: {}, {}'.format(r.status_code, email)
 
 # Check mturk account balance
 def check_balance():
@@ -31,12 +58,15 @@ def check_balance():
 		if float(account_balance[1:]) <= 10.00:
 			send_email()
 	except ValueError:
-		print('You are good to go')
+		print('You have an account balance of {0}'.format(account_balance))
 
 
-
+@task
 def process_user(account):
 	'''Call /files/list_folder for the given user ID and process any changes.'''
+
+	# Check Mturk account balance and notify if low
+	check_balance()
 
 	# cursor for the user (None the first time)
 	cursor = None
@@ -45,24 +75,22 @@ def process_user(account):
 
 	while has_more:
 		if cursor is None:
-			print('**************** result **********************')
 			result = dbx.files_list_folder(path='')
-			print('**************** after *********************')
-			print(result.entries)
 		else:
 			result = dbx.files_list_folder_continue(cursor)
 
 		for entry in result.entries:
-			# Ignore deleted files, folders, and non-markdown files
-			if (isinstance(entry, DeletedMetadata) or
-				isinstance(entry, FolderMetadata) or
-				not entry.path_lower.endswith('.md')):
-				continue
+			print(entry['.tag'])
+			# # Ignore deleted files, folders, and non-markdown files
+			# if (isinstance(entry, DeletedMetadata) or
+			# 	isinstance(entry, FolderMetadata) or
+			# 	not entry.path_lower.endswith('.md')):
+			# 	continue
 
-			# Convert to Markdown and store as <basename>.html
-			_, resp = dbx.files_download(entry.path_lower)
-			html = markdown(resp.content)
-			dbx.files_upload(html, entry.path_lower[:-3] + '.html', mode=WriteMode('overwrite'))
+			# # Convert to Markdown and store as <basename>.html
+			# _, resp = dbx.files_download(entry.path_lower)
+			# html = markdown(resp.content)
+			# dbx.files_upload(html, entry.path_lower[:-3] + '.html', mode=WriteMode('overwrite'))
 
 		# Update cursor
 		cursor = result.cursor
@@ -89,7 +117,7 @@ def webhook():
 			# actual work in a separate thread. For more robustness, it's a
 			# good idea to add the work to a reliable queue and process the queue
 			# in a worker process.
-			threading.Thread(target=process_user, args=(account,)).start()
+			process_user(account)
 	return ''
 
 
