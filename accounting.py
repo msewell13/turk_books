@@ -19,23 +19,23 @@ os.environ['AWS_SECRET_ACCESS_KEY'],
 host = 'mechanicalturk.sandbox.amazonaws.com')
 
 
-class Company(object):
-	def __init__(self, domain, users=None):
-		self.domain = domain
-		if users == None:
-			self.users = []
+# class Company(object):
+# 	def __init__(self, domain, users=None):
+# 		self.domain = domain
+# 		if users == None:
+# 			self.users = []
 
-	def add_user(self, user):
-		self.users.append[user]
+# 	def add_user(self, user):
+# 		self.users.append[user]
 
-	def del_user(self, name):
-		for user in self.users:
-			if name == user.name:
+# 	def del_user(self, name):
+# 		for user in self.users:
+# 			if name == user.name:
 
-class CompanyUser(Company):
-	def __init__(self, domain, mail_prefix):
-		self.mail_prefix = mail_prefix
-		super().__init__(domain)
+# class User(object):
+# 	def __init__(self, domain, mail_prefix):
+# 		self.mail_prefix = mail_prefix
+# 		super().__init__(domain)
 
 
 def send_email(email, name, subject, html, time, context, tags):
@@ -49,14 +49,15 @@ def send_email(email, name, subject, html, time, context, tags):
 		                                          "o:deliverytime": (datetime.utcnow() + timedelta(days=time)).strftime("%a, %d %b %Y %H:%M:%S +0000"),
 		                                          "v:context": json.dumps(context),
 		                                          "o:tag": tags})
-		print 'Status: {}, {}'.format(r.status_code, email)
+		print('Status: {}, {}'.format(r.status_code, email))
 
 # Check mturk account balance
 def check_balance():
 	try:
 		account_balance = str(mtc.get_account_balance()[0])
 		if float(account_balance[1:]) <= 10.00:
-			send_email()
+			print(account_balance)
+			#send_email()
 	except ValueError:
 		print('You have an account balance of {0}'.format(account_balance))
 
@@ -80,23 +81,33 @@ def process_user(account):
 			result = dbx.files_list_folder_continue(cursor)
 
 		for entry in result.entries:
-			print(entry['.tag'])
-			# # Ignore deleted files, folders, and non-markdown files
-			# if (isinstance(entry, DeletedMetadata) or
-			# 	isinstance(entry, FolderMetadata) or
-			# 	not entry.path_lower.endswith('.md')):
-			# 	continue
+			# if entry.path_lower == '/matthew/business/atlasalliancegroup/pythonfinancial/receipts/{}'.format(entry.name):
+			# 	print(entry.name)
+			# 	# receipts()
+			# elif entry.path_lower == 'matthew/business/atlasalliancegroup/pythonfinancial/bills/{}'.format(entry.name):
+			# 	# bills()
+			# 	print(entry.name)
+			# else:
+			# 	print(entry.path_lower)
 
-			# # Convert to Markdown and store as <basename>.html
-			# _, resp = dbx.files_download(entry.path_lower)
-			# html = markdown(resp.content)
-			# dbx.files_upload(html, entry.path_lower[:-3] + '.html', mode=WriteMode('overwrite'))
+
+			# Ignore deleted files, folders, and non-markdown files
+			if (isinstance(entry, DeletedMetadata) or
+				isinstance(entry, FolderMetadata) or
+				not entry.path_lower.endswith('.md')):
+				continue
+
+			# Convert to Markdown and store as <basename>.html
+			_, resp = dbx.files_download(entry.path_lower)
+			html = markdown(resp.content)
+			dbx.files_upload(html, entry.path_lower[:-3] + '.html', mode=WriteMode('overwrite'))
 
 		# Update cursor
 		cursor = result.cursor
 
 		# Repeat only if there's more to do
 		has_more = result.has_more
+		print(has_more)
 
 
 
@@ -122,7 +133,7 @@ def webhook():
 
 
 
-def mturk_receipts():
+def receipts():
 	question_html_value = """
 	<html>
 	<head>
