@@ -1,10 +1,12 @@
 from hashlib import sha256
 from zappa.async import task
 import hmac
-from flask import Flask, request
+from flask import Flask, request, render_template
 import dropbox
+from dropbox.files import FileMetadata
+from dropbox.exceptions import ApiError
 import os
-import boto
+import boto3
 from boto.mturk.connection import MTurkConnection
 from boto.mturk.connection import HTMLQuestion
 import json
@@ -13,29 +15,13 @@ import requests
 
 app = Flask(__name__)
 
-#Create connection to mturk
+# Instantiate Dropbox
+dbx = dropbox.Dropbox(os.environ['DB_ACCESS_TOKEN'])
+
+# Create connection to mturk
 mtc = MTurkConnection(os.environ['AWS_ACCESS_KEY_ID'],
 os.environ['AWS_SECRET_ACCESS_KEY'],
 host = 'mechanicalturk.sandbox.amazonaws.com')
-
-
-# class Company(object):
-# 	def __init__(self, domain, users=None):
-# 		self.domain = domain
-# 		if users == None:
-# 			self.users = []
-
-# 	def add_user(self, user):
-# 		self.users.append[user]
-
-# 	def del_user(self, name):
-# 		for user in self.users:
-# 			if name == user.name:
-
-# class User(object):
-# 	def __init__(self, domain, mail_prefix):
-# 		self.mail_prefix = mail_prefix
-# 		super().__init__(domain)
 
 
 def send_email(email, name, subject, html, time, context, tags):
@@ -62,53 +48,39 @@ def check_balance():
 		print('You have an account balance of {0}'.format(account_balance))
 
 
+def get_db_links(folder):
+	'''Move the file to a temporary folder, get the shared url and then process
+	the function that creates the HIT on Mechanical Turk'''
+
+	temp_folder = '/matthew/business/atlasalliancegroup/pythonfinancial/receipts/temp/'
+	result = dbx.files_list_folder(path=folder)
+	for entry in result.entries:
+		if isinstance(entry, FileMetadata):
+			move_file = dbx.files_move_v2(from_path=entry.path_lower, to_path='{0}{1}'.format(temp_folder, entry.name))
+			temp_location = move_file.metadata.path_lower
+			try:
+				doc_url = dbx.sharing_create_shared_link_with_settings(path=temp_location).url
+			except ApiError:
+				doc_url = dbx.sharing_list_shared_links(path=temp_location).links[0].url
+			create_hit(doc_url, temp_location)
+
+
+
 @task
 def process_user(account):
-	'''Call /files/list_folder for the given user ID and process any changes.'''
 
 	# Check Mturk account balance and notify if low
 	check_balance()
 
-	# cursor for the user (None the first time)
-	cursor = None
-	dbx = dropbox.Dropbox(os.environ['DB_ACCESS_TOKEN'])
-	has_more = True
+	receipts_folder = '/matthew/business/atlasalliancegroup/pythonfinancial/receipts/'
+	bills_folder = '/matthew/business/atlasalliancegroup/pythonfinancial/bills/'
+	
 
-	while has_more:
-		if cursor is None:
-			result = dbx.files_list_folder(path='')
-		else:
-			result = dbx.files_list_folder_continue(cursor)
+	get_db_links(receipts_folder)
+	# get_db_links(bills_folder)
+			
 
-		for entry in result.entries:
-			# if entry.path_lower == '/matthew/business/atlasalliancegroup/pythonfinancial/receipts/{}'.format(entry.name):
-			# 	print(entry.name)
-			# 	# receipts()
-			# elif entry.path_lower == 'matthew/business/atlasalliancegroup/pythonfinancial/bills/{}'.format(entry.name):
-			# 	# bills()
-			# 	print(entry.name)
-			# else:
-			# 	print(entry.path_lower)
-
-
-			# Ignore deleted files, folders, and non-markdown files
-			if (isinstance(entry, DeletedMetadata) or
-				isinstance(entry, FolderMetadata) or
-				not entry.path_lower.endswith('.md')):
-				continue
-
-			# Convert to Markdown and store as <basename>.html
-			_, resp = dbx.files_download(entry.path_lower)
-			html = markdown(resp.content)
-			dbx.files_upload(html, entry.path_lower[:-3] + '.html', mode=WriteMode('overwrite'))
-
-		# Update cursor
-		cursor = result.cursor
-
-		# Repeat only if there's more to do
-		has_more = result.has_more
-		print(has_more)
-
+	#dbx.files_permanently_delete(entry.path_lower)
 
 
 @app.route('/webhook', methods=['GET', 'POST'])
@@ -133,62 +105,16 @@ def webhook():
 
 
 
-def receipts():
-	question_html_value = """
-	<html>
-	<head>
-	<meta http-equiv='Content-Type' content='text/html; charset=UTF-8'/>
-	<script src='https://s3.amazonaws.com/mturk-public/externalHIT_v1.js' type='text/javascript'></script>
-	</head>
-	<body>
-	<!-- HTML to handle creating the HIT form -->
-	<form name='mturk_form' method='post' id='mturk_form' action='https://workersandbox.mturk.com/mturk/externalSubmit'>
-	<input type='hidden' value='' name='assignmentId' id='assignmentId'/>
-	<!-- This is where you define your question(s) --> 
-	<h1>Who is the vendor (name of the company) on the receipt?</h1>
-	<p><textarea name='answer' rows=3 cols=80></textarea></p>
-	<h1>What is the date of the transaction?</h1>
-	<p><textarea name='answer' rows=3 cols=80></textarea></p>
-	<h1>What is the total amount of the transaction?</h1>
-	<p><textarea name='answer' rows=3 cols=80></textarea></p>
-	<h1>What was the method of payment for this transaction?</h1>
-	<select name="Method of Payment">
-	  <option value="Amex">Amex ending in 1006</option>
-	  <option value="MasterCard">MC ending in 1726</option>
-	  <option value="Cash">Cash</option>
-	  <option value="Other">Other/Unknown</option>
-	</select>
-	<h1>What is the expense class? (This will be handwritten on the top of the reciept or highlighted.)</h1>
-	<select name="Class">
-	  <option value="2013 E. Mallon">2013 E. Mallon</option>
-	  <option value="45 Acres">45 Acres</option>
-	  <option value="Fernan 20 Acres">Fernan 20 Acres</option>
-	  <option value="AMA">Other/Unknown</option>
-	</select>
-	<!-- HTML to handle submitting the HIT -->
-	<p><input type='submit' id='submitButton' value='Submit' /></p></form>
-	<script language='Javascript'>turkSetAssignmentID();</script>
-	</body>
-	</html>
-	"""
-	# The first parameter is the HTML content
-	# The second is the height of the frame it will be shown in
-	# Check out the documentation on HTMLQuestion for more details
-	html_question = HTMLQuestion(question_html_value, 500)
-	# These parameters define the HIT that will be created
-	# question is what we defined above
-	# max_assignments is the # of unique Workers you're requesting
-	# title, description, and keywords help Workers find your HIT
-	# duration is the # of seconds Workers have to complete your HIT
-	# reward is what Workers will be paid when you approve their work
-	# Check out the documentation on CreateHIT for more details
+def create_hit(url, path):
+	# Load the form template and set the height of the frame it will be shown in
+	html_question = HTMLQuestion(render_template('form.html', url=url), 500)
 	response = mtc.create_hit(question=html_question,
 	                          max_assignments=1,
 	                          title="Enter the information on a receipt",
 	                          description="Help research a topic",
 	                          keywords="question, answer, research, receipt, data entry",
 	                          duration=120,
-	                          reward=0.50)
+	                          reward=0.10)
 	# The response included several fields that will be helpful later
 	hit_type_id = response[0].HITTypeId
 	hit_id = response[0].HITId
@@ -196,7 +122,20 @@ def receipts():
 	print("https://workersandbox.mturk.com/mturk/preview?groupId={}".format(hit_type_id))
 	print("Your HIT ID is: {}".format(hit_id))
 
+
+## Future Developments
+
+# Get responses from mturk and write them to our ledger file
+def ledger():
+		file = open('testfile.txt', 'a')
+		file.write('{} ! {}\n'.format(form.date.data, form.note.data)) 
+		file.write('    {}  {}\n'.format(form.to_account.data, form.to_amount.data))
+		file.write('    {}  {}\n'.format(form.from_account.data, form.from_amount.data))
+		file.close()
+
+# Update form to allow adding of classes and payment types
+
 if __name__ == '__main__':
-	app.run()
+	app.run(debug=True)
 
 
